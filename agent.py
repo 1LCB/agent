@@ -27,7 +27,11 @@ class Agent:
                 for name, param in signature.parameters.items()
             }
             return_annotation = signature.return_annotation
-            return_type = return_annotation.__name__ if return_annotation is not inspect.Signature.empty else "Any"
+            
+            if return_annotation is None:
+                return_type = "null"
+            else:
+                return_type = return_annotation.__name__ if return_annotation is not inspect.Signature.empty else "Any"
 
             tool_info = {
                 "name": f.__name__,
@@ -45,10 +49,12 @@ class Agent:
     def describe_functions(self) -> str:
         return json.dumps(self.tools_description, indent=4)
 
-    def run(self, task: str) -> str:
+    def run(self, task: str, instructions: str | None = None) -> str:
         log.green("TASK", task)
 
         system = f"You are a helpful AI assistant that breaks down tasks into steps and solves them systematically.\n\nYou have access to these tools: {self.describe_functions()}.\n\nIf you already know the answer, just say it."
+        if instructions:
+            system += f"\n\nYour Instructions:\n{instructions}"
 
         self.conversation_history = [
             {"role": "system", "content": system},
@@ -64,7 +70,9 @@ class Agent:
         if response_model.execute_function:
             log.yellow("FUNCTION", f"Executing {response_model.function_name} {response_model.function_parameters}")
             self.__execute_func(response_model) 
-        
+        elif response_model.final_answer:
+            return response_model.final_answer
+
         while True:
             response = self.__call_llm(format_response=NextStep)
             response_model = NextStep.model_validate_json(response)
@@ -79,7 +87,7 @@ class Agent:
                 return response_model.final_answer
 
     def __execute_func(self, response_model: NextStep | FirstStep):
-        result = self.tool_mapping[response_model.function_name](**response_model.function_parameters)
+        result = self.tool_mapping[response_model.function_name](**json.loads(response_model.function_parameters))
         self.conversation_history.append(
             {
                 "role": "user", 
